@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Directed Graph Viewer</title>
+    <link rel="icon" href="https://i.ebayimg.com/images/g/t84AAOSwgfZl2eyo/s-l400.jpg" type="image/png">
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <!-- Selectize.js for searchable dropdown -->
+    <link href="https://cdn.jsdelivr.net/npm/selectize@0.12.6/dist/css/selectize.default.css" rel="stylesheet"/>
+    <script src="https://cdn.jsdelivr.net/npm/selectize@0.12.6/dist/js/standalone/selectize.min.js"></script>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+
+        }
+
+        #controls {
+            padding: 10px;
+            background: #f9f9f9;
+            border-bottom: 1px solid #ccc;
+            height: 50px; /* Fixed height */
+            box-sizing: border-box;
+        }
+
+        #mynetwork {
+            width: 100%;
+            height: calc(100vh - 50px); /* Fills the rest of the page */
+        }
+    </style>
+</head>
+<body>
+
+<div id="controls">
+    <label for="nodeSelect">Choose a node:</label>
+    <select id="nodeSelect">
+        <option value="">-- Select a Node --</option>
+    </select>
+    <button id="topoSortBtn">
+        <img src="https://i.ebayimg.com/images/g/t84AAOSwgfZl2eyo/s-l400.jpg" alt="Sort Icon" style="width:16px; height:16px; vertical-align:middle; margin-right:6px;">
+        Show Topological Edge Sequence
+    </button>
+    <div id="dfsOutput" style="margin-top: 10px; font-family: monospace;"></div>
+</div>
+
+<div id="mynetwork"></div>
+
+<!-- Load graph data -->
+<script src="https://cdn.jsdelivr.net/gh/k072241152/graph-viewer-data/graph_data.js"></script>
+
+<script>
+    const dropdown = document.getElementById('nodeSelect');
+    const container = document.getElementById('mynetwork');
+
+    // Vis.js datasets
+    const nodes = new vis.DataSet([]);
+    const edges = new vis.DataSet([]);
+
+    const data = { nodes, edges };
+    const options = {
+      layout: {
+        hierarchical: {
+          direction: 'LR',
+          sortMethod: 'directed',
+          levelSeparation: 400,
+          nodeSpacing: 300,
+          treeSpacing: 300
+        }
+      },
+      edges: {
+        arrows: 'to',
+        smooth: true,
+        font: { align: 'middle' },
+        color: {
+          inherit: false
+        }
+      },
+      interaction: {
+        hover: true
+      },
+      physics: false
+    };
+
+    const network = new vis.Network(container, data, options);
+
+    // Populate dropdown with node list
+    allNodes.forEach(n => {
+      const opt = document.createElement("option");
+      opt.value = n.id;
+      opt.textContent = n.label;
+      dropdown.appendChild(opt);
+    });
+
+    // Get all descendants + 1-level predecessors
+    function getSubgraph(startNodeId) {
+      const queue = [startNodeId];
+      const visited = new Set();
+      const subNodes = new Set();
+      const subEdges = [];
+
+      // BFS for descendants
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (visited.has(current)) continue;
+        visited.add(current);
+        subNodes.add(current);
+
+        allEdges.forEach(edge => {
+          if (edge.from === current && !visited.has(edge.to)) {
+            queue.push(edge.to);
+            subEdges.push(edge);
+            subNodes.add(edge.to);
+          }
+        });
+      }
+
+      // Add direct predecessors (1 layer up)
+      allEdges.forEach(edge => {
+        if (edge.to === startNodeId && !subNodes.has(edge.from)) {
+          subNodes.add(edge.from);
+          subEdges.push(edge);
+        }
+      });
+
+      return {
+        nodes: Array.from(subNodes).map(id => allNodes.find(n => n.id === id)),
+        edges: subEdges
+      };
+    }
+
+    // Get direct parents of a node
+    function getParents(nodeId) {
+      return allEdges.filter(e => e.to === nodeId).map(e => e.from);
+    }
+
+    function getSubgraphFromParents(parents, selected) {
+      const reachableFromSelected = new Set();
+      const queue = [selected];
+
+      // Step 1: Get all descendants of the selected node
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (reachableFromSelected.has(current)) continue;
+        reachableFromSelected.add(current);
+
+        allEdges.forEach(e => {
+          if (e.from === current && !reachableFromSelected.has(e.to)) {
+            queue.push(e.to);
+          }
+        });
+      }
+
+      const visited = new Set();
+      const edgeList = [];
+
+      // Step 2: From each parent, traverse only paths that reach the selected node or its descendants
+      const parentQueue = [...parents];
+      while (parentQueue.length > 0) {
+        const current = parentQueue.shift();
+        if (visited.has(current)) continue;
+        visited.add(current);
+
+        allEdges.forEach(e => {
+          if (e.from === current && reachableFromSelected.has(e.to)) {
+            edgeList.push(e);
+            parentQueue.push(e.to);
+          }
+        });
+      }
+
+      // Step 3: Collect nodes involved in the final edge list
+      const nodeSet = new Set();
+      edgeList.forEach(e => {
+        nodeSet.add(e.from);
+        nodeSet.add(e.to);
+      });
+
+      const subNodes = Array.from(nodeSet)
+        .map(id => allNodes.find(n => n.id === id))
+        .filter(Boolean);
+
+      const uniqueEdges = Array.from(new Map(edgeList.map(e => [`${e.from}-${e.to}`, e])).values());
+
+      // Debug
+      console.log("Selected node:", selected);
+      console.log("Parents:", parents);
+      console.log("Reachable from selected:", Array.from(reachableFromSelected));
+      console.log("Subgraph node IDs:", Array.from(nodeSet));
+      console.log("Subgraph edges:", uniqueEdges.map(e => `${e.from}→${e.to}`));
+
+      return {
+        nodes: subNodes,
+        edges: uniqueEdges
+      };
+    }
+
+    // Kahn's Algorithm
+    function topologicalSort(nodeIds, edges) {
+      const inDegree = {};
+      const graph = {};
+
+      nodeIds.forEach(id => {
+        inDegree[id] = 0;
+        graph[id] = [];
+      });
+
+      edges.forEach(edge => {
+        if (graph[edge.from]) {
+          graph[edge.from].push(edge.to);
+          inDegree[edge.to]++;
+        }
+      });
+
+      const queue = [];
+      for (let id in inDegree) {
+        if (inDegree[id] === 0) {
+          queue.push(id);
+        }
+      }
+
+      const result = [];
+      while (queue.length > 0) {
+        const current = queue.shift();
+        result.push(current);
+        graph[current].forEach(neighbor => {
+          inDegree[neighbor]--;
+          if (inDegree[neighbor] === 0) {
+            queue.push(neighbor);
+          }
+        });
+      }
+
+      return result;
+    }
+
+    // Get edges connecting sorted nodes in order
+    function edgesInTopologicalOrder(sortedNodes, edges) {
+      const position = {};
+      sortedNodes.forEach((node, index) => {
+        position[node] = index;
+      });
+
+      return edges
+        .filter(e => position.hasOwnProperty(e.from) && position.hasOwnProperty(e.to))
+        .sort((a, b) => position[a.from] - position[b.from]);
+    }
+
+    // On dropdown change
+    dropdown.addEventListener("change", () => {
+      const selected = dropdown.value;
+      if (!selected) {
+        nodes.clear();
+        edges.clear();
+        return;
+      }
+
+      const subgraph = getSubgraph(selected);
+      nodes.clear();
+      edges.clear();
+      // Highlight the selected node
+      subgraph.nodes = subgraph.nodes.map(n => {
+        if (n.id === selected) {
+          return {
+            ...n,
+            color: {
+              background: '#ffeb3b',
+              border: '#fbc02d',
+              highlight: {
+                background: '#ffeb3b',
+                border: '#fbc02d',
+              },
+              hover: {
+                background: '#ffeb3b',
+                border: '#fbc02d',
+              }
+            },
+            borderWidth: 3
+          };
+        }
+        return n;
+      });
+
+      nodes.add(subgraph.nodes);
+      edges.add(subgraph.edges);
+    });
+
+    // Button event listener
+    document.getElementById('topoSortBtn').addEventListener('click', () => {
+      const selected = dropdown.value;
+      if (!selected) {
+        alert('Please select a node first.');
+        return;
+      }
+
+      // Get parents or fallback to the selected node itself
+      const parents = getParents(selected);
+      const startNodes = parents.length > 0 ? parents : [selected];
+
+
+      console.log("Selected node:", selected);
+      console.log("Parents:", parents);
+      console.log("Start nodes:", startNodes);
+
+
+      // 2. Get subgraph limited to those nodes and their successors
+      const { nodes: subgraphNodes, edges: subgraphEdges } = getSubgraphFromParents(startNodes, selected);
+
+
+      console.log("Subgraph Nodes:", subgraphNodes.map(n => n.id));
+      console.log("Subgraph Edges:", subgraphEdges.map(e => `${e.from} -> ${e.to}`));
+
+
+      // 3. Create topological sort only from this subgraph
+      const nodeIds = subgraphNodes.map(n => n.id);
+      const filteredEdges = subgraphEdges.filter(e => nodeIds.includes(e.from) && nodeIds.includes(e.to));
+      const sortedNodes = topologicalSort(nodeIds, subgraphEdges);
+      const topoEdges = edgesInTopologicalOrder(sortedNodes, subgraphEdges);
+
+      const seen = new Set();
+      const labelSequence = topoEdges
+        .map(e => e.title || `${e.from}→${e.to}`)
+        .filter(label => {
+          if (seen.has(label)) return false;
+          seen.add(label);
+          return true;
+        })
+        .map(label => `${label}\n↓`)
+        .join('\n')
+        .replace(/\n↓$/, '');
+
+      // Open popup window
+      const popup = window.open('', 'TopoSequence', 'width=800,height=600,scrollbars=yes');
+      popup.document.write(`
+        <html>
+          <head><title>Topological Edge Sequence</title></head>
+          <body style="font-family:Arial, sans-serif; padding: 20px;">
+            <h2>Topological Edge Label Sequence</h2>
+            <p style="white-space: pre-line;">${
+              labelSequence || '<i>No edges found</i>'
+            }</p>
+            <button onclick="window.close()">Close</button>
+          </body>
+        </html>
+      `);
+      popup.document.close();
+
+    });
+
+    // Optional: Force redraw on resize
+    window.addEventListener('resize', () => {
+      network.redraw();
+    });
+</script>
+</body>
+</html>
