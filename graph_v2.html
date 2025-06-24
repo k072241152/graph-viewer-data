@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Directed Graph Viewer</title>
+    <link href="https://i.ebayimg.com/images/g/t84AAOSwgfZl2eyo/s-l400.jpg" rel="icon" type="image/png">
+    <meta charset="UTF-8">
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+
+        #controls {
+            padding: 5px;
+            background: #ffffff;
+            border-bottom: 5px solid #ccc;
+            height: 176px;
+            overflow-y: auto;
+        }
+
+        #searchBox {
+            width: 300px;
+            padding: 5px;
+            margin-bottom: 5px;
+        }
+
+        #checkboxContainer {
+            height: 95px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 5px;
+            background: #fff;
+        }
+
+        #checkboxContainer label {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        #mynetwork {
+            width: 100%;
+            height: calc(100vh - 180px);
+        }
+
+        button {
+            margin-top: 5px;
+            padding: 4px 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="controls">
+    <input id="searchBox" placeholder="Filter nodes..." type="text">
+    <div id="checkboxContainer">
+        <!-- Checkboxes will be injected here -->
+        <div id="noMatchMessage" style="display: none; color: #999; padding: 5px; font-style: italic;">
+            No match found
+        </div>
+    </div>
+    <button id="updateGraphBtn">
+        <img alt="Sort Icon"
+             src="https://i.ebayimg.com/images/g/t84AAOSwgfZl2eyo/s-l400.jpg"
+             style="width:16px; height:16px; vertical-align:middle; margin-right:6px;">
+        Update Graph
+    </button>
+
+    <button id="topoSortBtn">
+        <img alt="Sort Icon"
+             src="https://i.ebayimg.com/images/g/t84AAOSwgfZl2eyo/s-l400.jpg"
+             style="width:16px; height:16px; vertical-align:middle; margin-right:6px;">
+        Show Topological Edge Sequence
+    </button>
+    <button id="resetSelectionBtn">
+        <img alt="Sort Icon"
+             src="https://i.ebayimg.com/images/g/t84AAOSwgfZl2eyo/s-l400.jpg"
+             style="width:16px; height:16px; vertical-align:middle; margin-right:6px;">
+        Reset Selected Nodes
+    </button>
+</div>
+
+<div id="mynetwork"></div>
+
+<!-- Load your graph data -->
+<script src="https://cdn.jsdelivr.net/gh/k072241152/graph-viewer-data/graph_data.js"></script>
+
+<script>
+    const container = document.getElementById('mynetwork');
+    const nodes = new vis.DataSet([]);
+    const edges = new vis.DataSet([]);
+    const data = {nodes, edges};
+
+    const options = {
+        layout: {
+            hierarchical: {
+                direction: 'LR',
+                sortMethod: 'directed',
+                levelSeparation: 400,
+                nodeSpacing: 300,
+                treeSpacing: 300
+            }
+        },
+        edges: {
+            arrows: 'to',
+            smooth: true,
+            font: {align: 'middle'},
+            color: {inherit: false}
+        },
+        interaction: {
+            hover: true
+        },
+        physics: false
+    };
+
+    const network = new vis.Network(container, data, options);
+
+    // Create checkboxes
+    function renderCheckboxList() {
+        const container = document.getElementById("checkboxContainer");
+
+        // Save and detach the "noMatchMessage" element
+        const noMatchMsg = document.getElementById("noMatchMessage");
+        container.innerHTML = ""; // Clear all existing children
+        container.appendChild(noMatchMsg); // Reattach "noMatchMessage" at the bottom
+
+        allNodes.forEach(node => {
+            const label = document.createElement("label");
+            label.className = "nodeItem";
+            label.innerHTML = `
+            <input type="checkbox" value="${node.id}" class="nodeCheckbox"> ${node.label}
+        `;
+            container.insertBefore(label, noMatchMsg); // Insert before the message
+        });
+    }
+
+    // Filter checkbox list
+    document.getElementById("searchBox").addEventListener("input", function () {
+        const filter = this.value.toLowerCase();
+        let anyVisible = false;
+
+        document.querySelectorAll(".nodeItem").forEach(label => {
+            const match = label.textContent.toLowerCase().includes(filter);
+            label.style.display = match ? "block" : "none";
+            if (match) anyVisible = true;
+        });
+
+        // Toggle "noMatchMessage"
+        document.getElementById("noMatchMessage").style.display = anyVisible ? "none" : "block";
+    });
+
+    // Update graph based on selected checkboxes
+    document.getElementById("updateGraphBtn").addEventListener("click", () => {
+        const selectedIds = Array.from(document.querySelectorAll(".nodeCheckbox:checked")).map(cb => cb.value);
+        if (selectedIds.length === 0) {
+            alert("Please select at least one node.")
+            return;
+        }
+
+        const subgraph = getMergedSubgraph(selectedIds);
+        nodes.clear();
+        edges.clear();
+
+        const highlighted = new Set(selectedIds);
+        subgraph.nodes = subgraph.nodes.map(n => {
+            if (highlighted.has(n.id)) {
+                return {
+                    ...n,
+                    color: {
+                        background: '#ffeb3b',
+                        border: '#fbc02d',
+                        highlight: {background: '#ffeb3b', border: '#fbc02d'},
+                        hover: {background: '#ffeb3b', border: '#fbc02d'}
+                    },
+                    borderWidth: 3
+                };
+            }
+            return n;
+        });
+
+        nodes.add(subgraph.nodes);
+        edges.add(subgraph.edges);
+        // Center the new subgraph in the viewport
+        network.fit({animation: true});
+    });
+
+    document.getElementById("resetSelectionBtn").addEventListener("click", () => {
+        // Uncheck all checkboxes
+        document.querySelectorAll(".nodeCheckbox").forEach(cb => cb.checked = false);
+
+        // Clear the graph display
+        nodes.clear();
+        edges.clear();
+    });
+
+    document.getElementById("checkboxContainer").addEventListener("change", function (e) {
+        const checkedBoxes = document.querySelectorAll(".nodeCheckbox:checked");
+        if (checkedBoxes.length > 2) {
+            e.target.checked = false; // Uncheck the last one
+            alert("You can select a maximum of 2 nodes.");
+        }
+    });
+
+    function getMergedSubgraph(startNodes) {
+        const visitedNodes = new Set();
+        const subEdges = [];
+
+        // Helper to collect upstream (1-layer) and all downstream
+        function collect(nodeId) {
+            const localVisited = new Set();
+            const queue = [nodeId];
+
+            // Add 1-layer predecessors
+            allEdges.forEach(edge => {
+                if (edge.to === nodeId) {
+                    visitedNodes.add(edge.from);
+                    if (!subEdges.some(e => e.from === edge.from && e.to === edge.to)) {
+                        subEdges.push(edge);
+                    }
+                }
+            });
+
+            // Downstream traversal (BFS)
+            while (queue.length > 0) {
+                const current = queue.shift();
+                if (localVisited.has(current)) continue;
+                localVisited.add(current);
+                visitedNodes.add(current);
+
+                allEdges.forEach(edge => {
+                    if (edge.from === current) {
+                        if (!subEdges.some(e => e.from === edge.from && e.to === edge.to)) {
+                            subEdges.push(edge);
+                        }
+                        queue.push(edge.to);
+                    }
+                });
+            }
+        }
+
+        startNodes.forEach(id => collect(id));
+
+        // Build node objects
+        const subNodes = Array.from(visitedNodes)
+            .map(id => allNodes.find(n => n.id === id))
+            .filter(Boolean);
+
+        return {nodes: subNodes, edges: subEdges};
+    }
+
+    // Initial render
+    renderCheckboxList();
+
+
+    <!-- Add this inside the existing <script> block -->
+
+    // Topological Sort (Kahn's Algorithm)
+    function topologicalSort(nodeIds, edges) {
+        const inDegree = {};
+        const graph = {};
+
+        nodeIds.forEach(id => {
+            inDegree[id] = 0;
+            graph[id] = [];
+        });
+
+        edges.forEach(edge => {
+            if (graph[edge.from]) {
+                graph[edge.from].push(edge.to);
+                inDegree[edge.to]++;
+            }
+        });
+
+        const queue = [];
+        for (let id in inDegree) {
+            if (inDegree[id] === 0) {
+                queue.push(id);
+            }
+        }
+
+        const result = [];
+        while (queue.length > 0) {
+            const current = queue.shift();
+            result.push(current);
+            console.log(result)
+            graph[current].forEach(neighbor => {
+                inDegree[neighbor]--;
+                if (inDegree[neighbor] === 0) {
+                    queue.push(neighbor);
+                }
+            });
+        }
+
+        return result;
+    }
+
+    function topologicalSortWithEdges(nodeIds, edges) {
+        const inDegree = {};
+        const graph = {};
+
+        // Initialize in-degree and graph structure
+        nodeIds.forEach(id => {
+            inDegree[id] = 0;
+            graph[id] = [];
+        });
+
+        edges.forEach(edge => {
+            if (graph[edge.from]) {
+                graph[edge.from].push(edge.to);
+                inDegree[edge.to]++;
+            }
+        });
+
+        const queue = [];
+        for (let id in inDegree) {
+            if (inDegree[id] === 0) {
+                queue.push(id);
+            }
+        }
+
+        const result = [];
+        const resultEdges = [];
+
+        while (queue.length > 0) {
+            const current = queue.shift();
+            result.push(current);
+
+            // Check for any edges from nodes in `result` to `current`
+            for (let prev of result.slice(0, -1)) { // exclude `current` itself
+                const edge = edges.find(e => e.from === prev && e.to === current);
+                if (edge) {
+                    resultEdges.push(edge);
+                }
+            }
+
+            graph[current].forEach(neighbor => {
+                inDegree[neighbor]--;
+                if (inDegree[neighbor] === 0) {
+                    queue.push(neighbor);
+                }
+            });
+        }
+
+        return {sortedNodes: result, sortedEdges: resultEdges};
+    }
+
+    // Get edges connecting sorted nodes in order
+    function edgesInTopologicalOrder(sortedNodes, edges) {
+        const edgeMap = new Map();
+
+        // Build lookup: from → list of edges
+        edges.forEach(edge => {
+            if (!edgeMap.has(edge.from)) {
+                edgeMap.set(edge.from, []);
+            }
+            edgeMap.get(edge.from).push(edge);
+        });
+
+        const result = [];
+
+        for (let i = 0; i < sortedNodes.length; i++) {
+            const from = sortedNodes[i];
+            const possibleEdges = edgeMap.get(from) || [];
+
+            // only include edges to nodes that come after `from` in topo order
+            for (const edge of possibleEdges) {
+                const toIndex = sortedNodes.indexOf(edge.to);
+                if (toIndex > i) {
+                    result.push(edge);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    // Show topological order of edge labels in popup
+    document.getElementById("topoSortBtn").addEventListener("click", () => {
+        // const currentNodes = nodes.get();
+        // const currentEdges = edges.get();
+        const selectedIds = Array.from(document.querySelectorAll(".nodeCheckbox:checked")).map(cb => cb.value);
+        const {nodes: currentNodes, edges: currentEdges} = getMergedSubgraph(selectedIds);
+
+        if (currentNodes.length === 0) {
+            alert("Please select at lease one node.");
+            return;
+        }
+
+        const nodeIds = currentNodes.map(n => n.id);
+        const filteredEdges = currentEdges.filter(e => nodeIds.includes(e.from) && nodeIds.includes(e.to));
+
+        //const sorted = topologicalSort(nodeIds, currentEdges);
+        //const sortedEdges = edgesInTopologicalOrder(sorted, currentEdges);
+        const {sortedNodes, sortedEdges} = topologicalSortWithEdges(nodeIds, currentEdges);
+
+
+        const seen = new Set();
+        const labelSequence = sortedEdges
+            .map(e => e.title || `${e.from}→${e.to}`)
+            .filter(label => {
+                if (seen.has(label)) return false;
+                seen.add(label);
+                return true;
+            })
+            .map(label => `${label}\n↓`)
+            .join('\n')
+            .replace(/\n↓$/, '');
+
+        // Show popup
+        const popup = window.open('', 'TopoSequence', 'width=800,height=600,scrollbars=yes');
+        popup.document.write(`
+        <html>
+        <head><title>Topological Edge Sequence</title></head>
+        <body style="font-family:Arial, sans-serif; padding:20px;">
+            <h2>Topological Edge Label Sequence</h2>
+            <p style="white-space: pre-line;">${labelSequence || '<i>No edges found</i>'}</p>
+            <button onclick="window.close()">Close</button>
+        </body>
+        </html>
+    `);
+        popup.document.close();
+    });
+
+    // Resize fix
+    window.addEventListener('resize', () => {
+        network.redraw();
+    });
+</script>
+
+</body>
+</html>
